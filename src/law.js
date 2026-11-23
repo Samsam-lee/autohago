@@ -6,7 +6,10 @@ const SERVICE_URL = 'https://www.law.go.kr/DRF/lawService.do';
 
 function getOC() {
   const oc = process.env.LAW_OC;
-  if (!oc) throw new Error('LAW_OC 환경변수가 없습니다. .env 파일을 확인하세요.');
+  if (!oc)
+    throw new Error(
+      '법제처 OC 값이 설정되지 않았습니다. Claude 데스크톱: 설정 > 확장 프로그램 > 국가법령정보 조회에서 OC를 입력하세요. Claude Code: 프로젝트 .env 파일에 LAW_OC를 적으세요.'
+    );
   return oc;
 }
 
@@ -16,12 +19,20 @@ async function callApi(baseUrl, params) {
   const res = await fetch(`${baseUrl}?${qs}`);
   const text = await res.text();
   if (!res.ok) throw new Error(`법제처 API HTTP ${res.status}: ${text.slice(0, 300)}`);
+  let data;
   try {
-    return JSON.parse(text);
+    data = JSON.parse(text);
   } catch {
-    // 인증 실패(OC 미승인, IP 미등록 등) 시 HTML/텍스트가 온다
     throw new Error(`법제처 API가 JSON이 아닌 응답을 보냈습니다: ${text.replace(/\s+/g, ' ').slice(0, 300)}`);
   }
+  // 인증 실패(OC 오타, API 사용 미승인, IP 미등록) 시 {result, msg}만 온다
+  if (data && typeof data.result === 'string' && data.result.includes('실패')) {
+    throw new Error(
+      `법제처 인증 실패: ${data.result} ${data.msg ?? ''} ` +
+        '(확인할 것: OC 값 오타, open.law.go.kr OPEN API 사용 승인 여부, 신청서에 등록한 IP가 지금 PC의 공인 IP와 같은지)'
+    );
+  }
+  return data;
 }
 
 const toArray = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);

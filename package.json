@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "mcp:law": "node src/mcp-server.js",
+    "build": "node scripts/build.mjs",
     "wehago:login": "node src/wehago-login.js",
     "wehago:check": "node src/wehago-check.js",
     "web": "node src/web/server.js"
@@ -12,5 +13,8 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "playwright": "^1.65.1",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2"
   }
 }
