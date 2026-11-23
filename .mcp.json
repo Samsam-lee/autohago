@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "korean-law": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "src/mcp-server.js"
+      ],
+      "env": {}
+    }
+  }
+}
