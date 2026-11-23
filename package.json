@@ -5,7 +5,8 @@
   "scripts": {
     "mcp:law": "node src/mcp-server.js",
     "wehago:login": "node src/wehago-login.js",
-    "wehago:check": "node src/wehago-check.js"
+    "wehago:check": "node src/wehago-check.js",
+    "web": "node src/web/server.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

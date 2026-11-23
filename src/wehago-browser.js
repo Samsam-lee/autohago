@@ -32,8 +32,7 @@ export function findChrome() {
 }
 
 /**
- * 프로필 기본 설정: "시작 시 이전 세션 계속"(restore_on_startup=1).
- * 이 설정이 있어야 창을 닫아도 세션 쿠키가 지워지지 않아 로그인이 유지된다.
+ * 프로필 기본 설정. 비정상 종료 복구 안내가 뜨지 않도록 exit_type을 정상으로 맞춘다.
  */
 function prepareProfile() {
   const prefDir = path.join(PROFILE_DIR, 'Default');
@@ -47,7 +46,8 @@ function prepareProfile() {
   } catch {
     // 새 프로필
   }
-  prefs.session = { ...prefs.session, restore_on_startup: 1 };
+  // 로그인 쿠키는 STATE_FILE로 직접 관리하므로, 이전 탭 복원은 끈다(5: 새 탭으로 시작)
+  prefs.session = { ...prefs.session, restore_on_startup: 5 };
   prefs.profile = { ...prefs.profile, exit_type: 'Normal' };
   fs.writeFileSync(prefFile, JSON.stringify(prefs));
 }
@@ -93,14 +93,38 @@ function toPlaywrightCookie(c) {
   return cookie;
 }
 
+/** Playwright 쿠키 → CDP Storage.setCookies 형식 */
+function toCdpCookie(c) {
+  const cookie = { name: c.name, value: c.value, domain: c.domain, path: c.path, httpOnly: c.httpOnly, secure: c.secure };
+  if (c.expires > 0) cookie.expires = c.expires;
+  if (c.sameSite) cookie.sameSite = c.sameSite;
+  return cookie;
+}
+
 /**
- * 로그인용: 일반 Chrome 창을 띄우고, 사용자가 창을 모두 닫을 때까지 기다린다.
- * 창이 열려 있는 동안 5초마다 위하고 쿠키(창을 닫으면 사라지는 세션 쿠키 포함)를 STATE_FILE에 저장한다.
+ * 사람이 쓰는 일반 Chrome 창을 띄우고, 사용자가 창을 모두 닫을 때까지 기다린다(로그인·위하고 열기 공용).
+ * - 저장된 로그인 쿠키를 먼저 넣은 뒤 url을 연다 → 로그인이 살아 있으면 바로 로그인된 화면이 뜬다.
+ * - 창이 열려 있는 동안 5초마다 위하고 쿠키(창을 닫으면 사라지는 세션 쿠키 포함)를 STATE_FILE에 저장한다.
+ * - 페이지에는 붙지 않고 브라우저 단위 명령만 쓰므로 구글 로그인 등에서 자동화로 감지되지 않는다.
  */
-export async function launchForLogin(url = WEHAGO_URL) {
+export async function launchVisible(url = WEHAGO_URL) {
   prepareProfile();
-  const child = spawn(findChrome(), chromeArgs([...debugArgs(), '--new-window', url]), { stdio: 'ignore' });
-  let exited = false;
+  const child = spawn(findChrome(), chromeArgs([...debugArgs(), '--new-window', 'about:blank']), { stdio: 'ignore' });
+  try {
+    await waitForDebugger();
+    const saved = loadSavedCookies();
+    if (saved.length) await browserCdp('Storage.setCookies', { cookies: saved.map(toCdpCookie) });
+    const blank = (await (await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`)).json()).filter(
+      (t) => t.type === 'page' && t.url === 'about:blank'
+    );
+    await browserCdp('Target.createTarget', { url });
+    for (const t of blank) await browserCdp('Target.closeTarget', { targetId: t.id }).catch(() => {});
+  } catch (e) {
+    // 쿠키 주입에 실패해도 창은 열어 둔다(사용자가 직접 로그인하면 됨)
+    await browserCdp('Target.createTarget', { url }).catch(() => {});
+    console.error('위하고 창 준비 중 오류:', e.message);
+  }
+  let exited = child.exitCode != null;
   const done = new Promise((resolve, reject) => {
     child.on('error', reject);
     child.on('exit', (code) => {
@@ -127,6 +151,9 @@ export async function launchForLogin(url = WEHAGO_URL) {
   return { savedCookies: saved };
 }
 
+/** 로그인용(기존 이름 유지) */
+export const launchForLogin = (url = WEHAGO_URL) => launchVisible(url);
+
 function loadSavedCookies() {
   try {
     return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')).cookies ?? [];
@@ -151,12 +178,16 @@ async function waitForDebugger(timeoutMs = 20000) {
 
 /** 자동화용: 같은 프로필로 Chrome을 띄우고 Playwright로 연결한다. */
 export async function openWehago({ headless = false } = {}) {
-  prepareProfile();
-  const extra = debugArgs();
-  if (headless) extra.push('--headless=new', '--window-size=1400,900');
-  const child = spawn(findChrome(), chromeArgs([...extra, 'about:blank']), { stdio: 'ignore' });
-
-  await waitForDebugger();
+  // 이전 실행이 강제 종료돼 같은 프로필의 Chrome이 남아 있으면 그대로 재사용한다
+  const alreadyUp = await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`).then((r) => r.ok).catch(() => false);
+  let child = null;
+  if (!alreadyUp) {
+    prepareProfile();
+    const extra = debugArgs();
+    if (headless) extra.push('--headless=new', '--window-size=1400,900');
+    child = spawn(findChrome(), chromeArgs([...extra, 'about:blank']), { stdio: 'ignore' });
+    await waitForDebugger();
+  }
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${DEBUG_PORT}`);
   const context = browser.contexts()[0];
   const saved = loadSavedCookies();
@@ -164,10 +195,19 @@ export async function openWehago({ headless = false } = {}) {
   const page = context.pages()[0] ?? (await context.newPage());
 
   const close = async () => {
+    // 사용 중 갱신된 로그인 토큰을 다시 저장해 둔다(로그인된 상태일 때만)
+    try {
+      const fresh = (await context.cookies()).filter(isWehagoCookie);
+      if (fresh.some((c) => c.name === 'AUTH_A_TOKEN')) {
+        fs.writeFileSync(STATE_FILE, JSON.stringify({ savedAt: new Date().toISOString(), cookies: fresh }));
+      }
+    } catch {
+      // 이미 닫힌 경우
+    }
     // Chrome을 정상 종료해야 프로필이 "비정상 종료"로 남지 않는다
     const cdp = await browser.newBrowserCDPSession().catch(() => null);
     await cdp?.send('Browser.close').catch(() => {});
-    await new Promise((r) => (child.exitCode != null ? r() : child.once('exit', r)));
+    if (child) await new Promise((r) => (child.exitCode != null ? r() : child.once('exit', r)));
   };
   return { browser, context, page, close };
 }

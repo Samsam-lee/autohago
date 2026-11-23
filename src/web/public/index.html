@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>autohago · 수임처 자동화</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">a</span>
+      <div>
+        <h1>autohago</h1>
+        <p>위하고 수임처 자동화</p>
+      </div>
+    </div>
+    <div class="session">
+      <span id="loginState" class="pill pill-wait">확인 중…</span>
+      <button id="loginBtn" class="btn" hidden>위하고 로그인</button>
+      <button id="openBtn" class="btn" title="로그인된 위하고 화면을 새 창으로 엽니다">위하고 열기 ↗</button>
+      <button id="refreshBtn" class="btn" title="위하고에서 수임처 목록을 다시 불러옵니다">목록 새로고침</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="toolbar">
+      <input id="search" type="search" placeholder="상호, 사업자번호, 대표자로 검색" autocomplete="off" />
+      <div class="seg" role="radiogroup" aria-label="사업자 구분">
+        <button data-filter="all" class="on">전체</button>
+        <button data-filter="corp">법인</button>
+        <button data-filter="private">개인</button>
+      </div>
+      <span id="count" class="count"></span>
+      <span id="updated" class="count updated"></span>
+    </section>
+
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="chk"><input id="checkAll" type="checkbox" aria-label="전체 선택" /></th>
+            <th>상호</th>
+            <th>사업자번호</th>
+            <th>대표자</th>
+            <th>구분</th>
+            <th>업태 · 종목</th>
+            <th>회계기간</th>
+            <th>태그</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="empty" hidden></div>
+    </section>
+  </main>
+
+  <footer class="actionbar">
+    <div class="selected"><strong id="selCount">0</strong>곳 선택</div>
+    <div id="tasks" class="tasks"></div>
+  </footer>
+
+  <aside id="log" class="log" aria-live="polite"></aside>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
